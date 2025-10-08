@@ -11,6 +11,21 @@ csv_path = "/nvme/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/m
 out_dir = "/nvme/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/"
 os.makedirs(out_dir, exist_ok=True)
 
+# ------------------ Helper function ------------------
+def compute_binned_snr(wave, flux, err, lam_min, lam_max):
+    """Compute SNR in a wavelength bin [lam_min, lam_max]"""
+    mask = (wave >= lam_min) & (wave <= lam_max)
+    flux_bin = flux[mask]
+    err_bin  = err[mask]
+    
+    if len(flux_bin) == 0:
+        return np.nan
+    
+    total_flux = np.sum(flux_bin)
+    total_err  = np.sqrt(np.sum(err_bin**2))
+    snr_bin = total_flux / total_err
+    return snr_bin
+
 # --- Step 1: Read CSV and extract redshift ---
 df = pd.read_csv(csv_path, sep=",")  # adjust sep if needed
 fits_name = os.path.basename(fits_path)
@@ -26,7 +41,7 @@ print(f"Found redshift z = {z:.4f} for {fits_name}")
 with fits.open(fits_path) as hdul:
     hdul.info()
     spec = hdul['SPEC1D'].data  # update if your extension differs
-    print(hdul['SPEC1D'].header)
+    # print(hdul['SPEC1D'].header)
 
 wave_obs = spec['wave']   # observed wavelength [μm]
 flux_obs = spec['flux']   # observed flux in μJy
@@ -53,10 +68,7 @@ err_rest  = err_lambda * (1 + z)**2
 plt.figure(figsize=(10, 5))
 
 # Sigma-clip and mask invalid values
-flux_clipped = sigma_clip(flux_rest, sigma=5, maxiters=2)
-mask = (
-    (~flux_clipped.mask)
-    & np.isfinite(wave_rest)
+mask = (np.isfinite(wave_rest)
     & np.isfinite(flux_rest)
     & np.isfinite(err_rest)
     & (wave_rest > 1200)        # keep only λ > 2000 Å
@@ -104,37 +116,35 @@ valid = np.isfinite(snr_pixel)
 wave_snr = wave_plot[valid]
 snr_pixel = snr_pixel[valid]
 
-# --- Step 6: Compute average SNR in UV continuum (1250–3000 Å) ---
-
-# Define the UV continuum range (Å)
+# --- Step 7: Average SNR in UV continuum (1250–3000 Å) ---
 uv_min, uv_max = 1250, 3000
-
-# Select SNR values within that wavelength range
 uv_mask = (wave_snr >= uv_min) & (wave_snr <= uv_max)
 snr_uv = snr_pixel[uv_mask]
+avg_snr_uv = np.mean(snr_uv) if len(snr_uv) > 0 else np.nan
+print(f"Average per-pixel SNR (UV 1250–3000 Å): {avg_snr_uv:.2f}")
 
-# Avoid dividing by zero if there are no valid points
-if len(snr_uv) == 0:
-    avg_snr_uv = np.nan
-    print("No valid SNR points in the 1250–3000 Å range.")
-else:
-    avg_snr_uv = np.mean(snr_uv)
-    print(f"Average SNR in UV continuum (1250–3000 Å): {avg_snr_uv:.2f}")
+# --- Step 8: Compute binned SNR ---
+bin_min, bin_max = 1250, 3000  # UV continuum
+bin_snr = compute_binned_snr(wave_snr, flux_plot[valid], err_plot[valid], bin_min, bin_max)
+print(f"SNR in bin {bin_min}–{bin_max} Å: {bin_snr:.2f}")
 
-# Optionally plot only the UV region for a visual check
-plt.figure(figsize=(10, 4))
-plt.plot(wave_snr, snr_pixel, color='darkorange', lw=1.0, alpha=0.7)
-plt.axvspan(uv_min, uv_max, color='lightgrey', alpha=0.3, label='UV continuum range')
-plt.axhline(avg_snr_uv, color='red', lw=1.0, linestyle='--', label=f'⟨SNR⟩ = {avg_snr_uv:.2f}')
-plt.xlabel(r"Wavelength $\lambda_{\rm rest}$ [Å]", fontsize=13)
-plt.ylabel("S/N per pixel", fontsize=13)
-plt.title(f"Average SNR in UV range (1250–3000 Å)\n{fits_name}", fontsize=14)
+# --- Step 9: Optional plot SNR per pixel ---
+plt.figure(figsize=(10,4))
+plt.plot(wave_snr, snr_pixel, color='darkorange', lw=1.0, alpha=0.7, label='Per-pixel SNR')
+plt.axvspan(uv_min, uv_max, color='lightgrey', alpha=0.3, label='UV continuum (1250–3000 Å)')
+plt.axhline(avg_snr_uv, color='red', linestyle='--', lw=1.0, label=f'Avg per-pixel UV SNR = {avg_snr_uv:.2f}')
+
+# Add the binned SNR as a horizontal line over the bin wavelength range
+plt.hlines(bin_snr, bin_min, bin_max, colors='blue', lw=2.0, label=f'Binned SNR {bin_min}-{bin_max} Å = {bin_snr:.2f}')
+plt.axvline(bin_min, color='blue', linestyle=':', lw=1)
+plt.axvline(bin_max, color='blue', linestyle=':', lw=1)
+
+plt.xlabel("Wavelength [Å]")
+plt.ylabel("S/N per pixel")
+plt.title("S/N per pixel with UV average and binned SNR")
 plt.legend(frameon=False)
 plt.grid(alpha=0.3)
 plt.tight_layout()
-
-out_snr_uv = os.path.join(out_dir, fits_name.replace('.fits', '_UV_SNR_range.png'))
-plt.savefig(out_snr_uv, dpi=200)
+out_snr_plot = os.path.join(out_dir, fits_name.replace('.fits','_UV_SNR.png'))
+plt.savefig(out_snr_plot, dpi=200)
 plt.show()
-
-print(f"Saved UV SNR range plot to: {out_snr_uv}")

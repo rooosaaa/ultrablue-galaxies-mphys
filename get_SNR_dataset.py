@@ -54,10 +54,7 @@ def convert_to_rest_frame(wave_obs, flux_obs, err_obs, z):
 
 
 def clean_spectrum(wave, flux, err, min_wave=MIN_WAVELENGTH):
-    flux_clipped = sigma_clip(flux, sigma=5, maxiters=2)
-    mask = (
-        (~flux_clipped.mask)
-        & np.isfinite(wave)
+    mask = (np.isfinite(wave)
         & np.isfinite(flux)
         & np.isfinite(err)
         & (wave > min_wave)
