@@ -104,24 +104,6 @@ valid = np.isfinite(snr_pixel)
 wave_snr = wave_plot[valid]
 snr_pixel = snr_pixel[valid]
 
-# Plot SNR vs wavelength
-# plt.figure(figsize=(10, 4))
-# plt.plot(wave_snr, snr_pixel, color='darkorange', lw=1.0)
-# plt.axhline(0, color='grey', lw=0.8, linestyle='--')
-
-# plt.xlabel(r"Wavelength $\lambda_{\rm rest}$ [Å]", fontsize=13)
-# plt.ylabel(r"S/N per pixel", fontsize=13)
-# plt.title(f"Per-pixel Signal-to-Noise Ratio (λ > 1200 Å)\n{fits_name}", fontsize=14)
-# plt.grid(alpha=0.3)
-# plt.tight_layout()
-
-# # Save SNR plot
-# out_snr = os.path.join(out_dir, fits_name.replace('.fits', '_restframe_SNR.png'))
-# plt.savefig(out_snr, dpi=200)
-# plt.show()
-
-# print(f"Saved per-pixel SNR plot to: {out_snr}")
-
 # --- Step 6: Compute average SNR in UV continuum (1250–3000 Å) ---
 
 # Define the UV continuum range (Å)
