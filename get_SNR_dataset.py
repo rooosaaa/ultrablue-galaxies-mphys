@@ -54,11 +54,7 @@ def convert_to_rest_frame(wave_obs, flux_obs, err_obs, z):
 
 
 def clean_spectrum(wave, flux, err, min_wave=MIN_WAVELENGTH):
-    mask = (np.isfinite(wave)
-        & np.isfinite(flux)
-        & np.isfinite(err)
-        & (wave > min_wave)
-    )
+    mask = ((wave > min_wave))
     return wave[mask], flux[mask], err[mask]
 
 
@@ -111,16 +107,27 @@ def plot_snr(wave, snr, avg_snr, fits_name, out_dir, wave_range=UV_RANGE):
     return out_plot
 
 
-def passes_quality_checks(flux, snr_uv):
+def passes_quality_checks(flux, snr_uv, max_consec_nans=10):
     """
     Check if the spectrum passes the quality criteria:
-    1. No band gap in the entire spectrum (no NaNs in flux).
-    2. Average SNR in UV range is positive.
+    1. Reject if there are 10 or more consecutive NaNs in the flux (band gap).
+    2. Reject if the average SNR in the UV range is not positive.
     """
-    if not np.all(np.isfinite(flux)):
-        return False
+
+    # --- 1. Check for 10+ consecutive NaNs ---
+    nan_mask = ~np.isfinite(flux)
+    if np.any(nan_mask):
+        # Count consecutive NaNs using run-length encoding logic
+        consec_counts = np.diff(np.where(np.concatenate(([nan_mask[0]],
+                                                         nan_mask[:-1] != nan_mask[1:],
+                                                         [True])))[0])[::2]
+        if len(consec_counts) > 0 and np.any(consec_counts >= max_consec_nans):
+            return False
+
+    # --- 2. Check SNR criterion ---
     if snr_uv is None or np.isnan(snr_uv) or snr_uv <= 0:
         return False
+
     return True
 
 
