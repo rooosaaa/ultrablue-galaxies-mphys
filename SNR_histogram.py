@@ -20,6 +20,10 @@ print(f"Number of spectra with avg SNR > {threshold} (excluded from plot): {num_
 num_plotted = len(df_filtered)
 print(f"Number of spectra being plotted (≤ {threshold}): {num_plotted}")
 
+# Count how many spectra have SNR > 5
+num_snr_above_5 = (df['avg_snr_uv'] > 5).sum()
+print(f"Number of spectra with avg SNR > 5: {num_snr_above_5}")
+
 # Extract the filtered SNR values
 snr_values = df_filtered['avg_snr_uv']
 
@@ -49,3 +53,31 @@ plt.tight_layout()
 # Save figure
 plt.savefig(out_path, dpi=200)
 plt.show()
+
+# --- Paths ---
+hist_out_path = "/nvme/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/UV_SNR_histogram_5-30.png"
+csv_out_path  = "/nvme/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/uv_snr_5-30.csv"
+
+# --- Filter SNR values between 5 and 30 ---
+snr_min = 5
+snr_max = 30
+df_snr_range = df[(df['avg_snr_uv'] >= snr_min) & (df['avg_snr_uv'] <= snr_max)]
+
+num_in_range = len(df_snr_range)
+print(f"Number of spectra with avg SNR between {snr_min}-{snr_max}: {num_in_range}")
+
+# --- Plot histogram ---
+plt.figure(figsize=(8,5))
+plt.hist(df_snr_range['avg_snr_uv'], bins=60, color='dodgerblue', edgecolor='black', alpha=0.7)
+plt.xlabel("Average SNR in UV continuum (1250–3000 Å)")
+plt.ylabel("Number of spectra")
+plt.title(f"Histogram of Average UV SNRs ({snr_min} ≤ SNR ≤ {snr_max})")
+plt.grid(alpha=0.3)
+plt.tight_layout()
+plt.savefig(hist_out_path, dpi=200)
+plt.show()
+print(f"Saved histogram to: {hist_out_path}")
+
+# --- Save filtered CSV ---
+df_snr_range.to_csv(csv_out_path, index=False)
+print(f"Saved filtered SNR data to: {csv_out_path}")
