@@ -21,7 +21,6 @@ df_master = pd.read_csv(master_csv)
 df_targets = pd.read_csv(target_csv)
 
 # pick one target to test
-# target_name = df_targets['file'].iloc[0]  # or whichever column has filenames
 target_name = 'jades-gds-w03-v4_prism-clear_1212_372.spec.fits'
 print(f"Plotting target: {target_name}")
 
@@ -36,44 +35,35 @@ fits_path = os.path.join(fits_dir, target_name)
 # ---------------------- FUNCTIONS ----------------------
 
 def read_spectrum(fits_path):
-    """Extract 1D spectrum arrays (wavelength, flux, error)"""
+    """Extracts 1D spectrum arrays and ensures wavelength is in microns."""
     with fits.open(fits_path) as hdul:
-        spec1d = hdul['SPEC1D'].data
-        wave = spec1d['wave']
-        flux = spec1d['flux']
-        err = spec1d['err']
+        try:
+            spec1d = hdul['SPEC1D'].data
+        except KeyError:
+            spec1d = hdul[1].data
+        wave, flux, err = spec1d['wave'], spec1d['flux'], spec1d['err']
+        if np.nanmax(wave) > 100.0:
+            wave = wave / 1e4  # convert Å to μm if needed
     return wave, flux, err
 
 
-def read_2d_spectrum(fits_path, z):
-    """Extract the 2D spectral image and compute rest-frame wavelengths from header"""
+def read_2d_spectrum(fits_path):
+    """Extracts the 2D spectral image."""
     with fits.open(fits_path) as hdul:
-        if 'SPEC2D' in hdul:
-            hdu = hdul['SPEC2D']
+        if 'SCI' in hdul:
+            data_2d = hdul['SCI'].data
+        elif 'SPEC2D' in hdul:
+            data_2d = hdul['SPEC2D'].data
         else:
-            hdu = hdul['SCI']
-        data_2d = hdu.data
-        header_2d = hdu.header
-
-    # Extract wavelength info from header
-    wav_start = header_2d['WAVSTART'] * 1e10  # m -> Å
-    wav_end = header_2d['WAVEND'] * 1e10      # m -> Å
-    n_spec = data_2d.shape[1]
-
-    # Linear mapping from pixel to observed wavelength
-    wave_obs_2d = np.linspace(wav_start, wav_end, n_spec)
-
-    # Convert to rest-frame
-    wave_rest_2d = wave_obs_2d / (1 + z)
-
-    return data_2d, wave_rest_2d
-
+            data_2d = hdul[0].data if len(hdul) > 0 else None
+    if data_2d is None:
+        raise KeyError("Could not find 2D spectral data.")
+    return data_2d
 
 def convert_to_rest_frame(wave_obs, flux_obs, err_obs, z):
-    """Convert observed spectrum to rest-frame F_lambda in erg/s/cm^2/Å"""
-    flux_nu = flux_obs * 1e-29  # assuming input is Jy
+    flux_nu = flux_obs * 1e-29
     err_nu = err_obs * 1e-29
-    wave_A = wave_obs * 1e4  # microns -> Å if applicable
+    wave_A = wave_obs * 1e4
     flux_lambda = flux_nu * C_LIGHT / wave_A**2
     err_lambda = err_nu * C_LIGHT / wave_A**2
     wave_rest = wave_A / (1 + z)
@@ -81,98 +71,90 @@ def convert_to_rest_frame(wave_obs, flux_obs, err_obs, z):
     err_rest = err_lambda * (1 + z)**2
     return wave_rest, flux_rest, err_rest
 
+def clean_data(wave, flux, err, data_2d):
+    """Masks non-finite values and applies same mask to 2D array."""
+    mask = np.isfinite(wave) & np.isfinite(flux) & np.isfinite(err)
+    wave_clean = wave[mask]
+    flux_clean = flux[mask]
+    err_clean = err[mask]
+    data_2d_clean = data_2d[:, mask]
+    return wave_clean, flux_clean, err_clean, data_2d_clean
 
-def clean_spectrum(wave, flux, err, min_wave=MIN_WAVELENGTH):
-    mask = wave > min_wave
-    return wave[mask], flux[mask], err[mask]
 
+def plot_2d_spectrum(ax, data_2d, wave_x_axis):
+    """Plots the 2D spectrum using pcolormesh for precise grid alignment."""
+    finite_vals = data_2d[np.isfinite(data_2d)]
+    vmin, vmax = np.percentile(finite_vals, [10, 99]) if len(finite_vals) > 0 else (0, 1)
 
-def plot_2d_spectrum(ax, data_2d, wave_rest, target_name, z):
-    """
-    Plot the 2D spectrum with rest-frame wavelength on x-axis.
-    """
-    # Number of spectral pixels in 2D
-    n_spec = data_2d.shape[1]
+    # Pixel corners
+    y_corners = np.arange(data_2d.shape[0] + 1)
+    wave_midpoints = (wave_x_axis[:-1] + wave_x_axis[1:]) / 2.0
+    dw_start = wave_x_axis[1] - wave_x_axis[0]
+    dw_end = wave_x_axis[-1] - wave_x_axis[-2]
+    x_corners = np.concatenate([
+        [wave_x_axis[0] - dw_start / 2.0],
+        wave_midpoints,
+        [wave_x_axis[-1] + dw_end / 2.0]
+    ])
 
-    # Map 2D pixels linearly to the rest-frame wavelength range of the 1D spectrum
-    wave_2d_rest = np.linspace(wave_rest[0], wave_rest[-1], n_spec)
-
-    # Clip for contrast
-    vmin, vmax = np.percentile(data_2d, [10, 99])
-    
-    n_spatial = data_2d.shape[0]
-    extent = [wave_2d_rest[0], wave_2d_rest[-1], 0, n_spatial-1]
-    
-    im = ax.imshow(
-        data_2d,
-        aspect='auto',
-        origin='lower',
-        cmap='magma',
-        interpolation='none',
-        vmin=vmin,
-        vmax=vmax,
-        extent=extent
-    )
-    
-    ax.set_ylabel("Spatial axis (pix)")
-    ax.set_xlabel("Rest-frame Wavelength [Å]")
-    ax.set_title(f"2D + 1D Spectrum: {target_name}\n(z = {z:.3f})")
-    
-    # Add colorbar
-    # cbar = plt.colorbar(im, ax=ax, orientation='vertical', pad=0.02)
-    # cbar.set_label('Flux / counts', rotation=270, labelpad=15)
-    
-    return im
+    ax.pcolormesh(x_corners, y_corners, data_2d, cmap='magma_r',
+                  vmin=vmin, vmax=vmax, shading='auto')
+    ax.set_ylabel("Spatial Axis (pix)")
+    ax.set_title("2D Spectrum (Observed Wavelength)", pad=15)
 
 
 def plot_1d_spectrum(ax, wave, flux, err):
-    """
-    Plot the 1D rest-frame spectrum with uncertainty (wavelength 1200-10000 Å).
-    """
-    # mask = (wave >= 1200)
-    # wave, flux, err = wave[mask], flux[mask], err[mask]
+    """Plots the 1D spectrum with error shading and legend."""
+    # Plot flux
+    ax.plot(wave, flux, color='dodgerblue', lw=1.0, label='1D Spectrum')
+    
+    # Plot error region with label for legend
+    ax.fill_between(wave, flux - err, flux + err, color='lightblue', alpha=0.4, label='Error')
 
-    ax.plot(wave, flux, color='dodgerblue', lw=1.0, label='Rest-frame spectrum')
-    ax.fill_between(wave, flux - err, flux + err, color='lightblue', alpha=0.4)
-    ax.set_xlabel(r"Wavelength $\lambda_{\rm rest}$ [Å]")
-    ax.set_ylabel(r"$F_\lambda$ [erg s$^{-1}$ cm$^{-2}$ Å$^{-1}$]")
+    # Auto y-limits based on percentiles
+    combined_data = np.concatenate([flux - err, flux + err])
+    finite_data = combined_data[np.isfinite(combined_data)]
+    if len(finite_data) > 10:
+        y_min, y_max = np.percentile(finite_data, [0.9, 99.5])
+        y_range = y_max - y_min
+        y_margin = 0.15 * y_range
+        ax.set_ylim(y_min - y_margin, y_max + y_margin)
+
+    # Labels and grid
+    ax.set_xlabel(r"Observed Wavelength $\lambda_{\rm obs}$ [$\mu$m]")
+    ax.set_ylabel(r"$F_{\nu}$ [$\mu$Jy]")
     ax.grid(alpha=0.3)
-    ax.legend(frameon=False)
-
-
-def plot_spectra_2d_1d(data_2d, wave_rest, wave_rest_2d, flux, err, z, target_name, out_dir):
-    """
-    Combine the 2D and 1D spectra into a single stacked figure with matching x-axis.
-    """
-    fig, ax = plt.subplots(
-        2, 1, figsize=(12, 7),
-        gridspec_kw={'height_ratios': [2, 1]}, sharex=True
-    )
-
-    # Plot both
-    plot_2d_spectrum(ax[0], data_2d, wave_rest_2d, target_name, z)
-    plot_1d_spectrum(ax[1], wave_rest, flux, err)
-
-    # Limit 1D wavelength axis
-    # ax[1].set_xlim(left=1200)
-
-    plt.tight_layout()
-    out_path = os.path.join(out_dir, target_name.replace('.fits', '_2D_1D.png'))
-    plt.savefig(out_path, dpi=200)
-    plt.close()
-    print(f"Saved: {out_path}")
+    
+    # Legend with error key
+    ax.legend(frameon=True)
 
 
 # ---------------------- MAIN ----------------------
 
-# Load both 1D + 2D spectra
+# Load and clean data
 wave_obs, flux_obs, err_obs = read_spectrum(fits_path)
-data_2d, wave_rest_2d = read_2d_spectrum(fits_path, z)
+data_2d_original = read_2d_spectrum(fits_path)
+wave_obs_c, flux_obs_c, err_obs_c, data_2d_c = clean_data(wave_obs, flux_obs, err_obs, data_2d_original)
 
-# Convert to rest-frame
-wave_rest, flux_rest, err_rest = convert_to_rest_frame(wave_obs, flux_obs, err_obs, z)
-wave_rest, flux_rest, err_rest = clean_spectrum(wave_rest, flux_rest, err_rest)
+# Create the figure
+fig, ax = plt.subplots(2, 1, figsize=(12, 7),
+                       gridspec_kw={'height_ratios': [1, 2]}, sharex=True)
 
-# Plot
-plot_spectra_2d_1d(data_2d, wave_rest, wave_rest_2d, flux_rest, err_rest, z, target_name, out_dir)
+# Plot 2D spectrum
+plot_2d_spectrum(ax[0], data_2d_c, wave_obs_c)
+ax[0].text(0.98, 0.98, f"z = {z:.3f}", transform=ax[0].transAxes,
+           ha='right', va='top',
+           bbox=dict(facecolor='white', alpha=0.7, edgecolor='none'))
 
+# Corrected: flux first, err second
+plot_1d_spectrum(ax[1], wave_obs_c, flux_obs_c, err_obs_c)
+
+# Final touches
+ax[0].set_xlim(wave_obs_c[0], wave_obs_c[-1])
+plt.setp(ax[0].get_xticklabels(), visible=False)
+plt.tight_layout(pad=0.5)
+
+out_path = os.path.join(out_dir, target_name.replace('.fits', '_2D_1D_Aligned_pcolormesh.png'))
+plt.savefig(out_path, dpi=200)
+plt.close()
+print(f"Saved final aligned plot to: {out_path}")

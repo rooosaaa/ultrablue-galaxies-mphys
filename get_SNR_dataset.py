@@ -42,9 +42,13 @@ def read_spectrum(fits_path):
 
 
 def convert_to_rest_frame(wave_obs, flux_obs, err_obs, z):
-    flux_nu = flux_obs * 1e-29
+    """
+    Convert observed flux in μJy and wavelength in μm to rest-frame
+    wavelength in Å and flux in μJy (λ * Fλ) units.
+    """
+    flux_nu = flux_obs * 1e-29         # μJy → erg/s/cm²/Hz
     err_nu = err_obs * 1e-29
-    wave_A = wave_obs * 1e4
+    wave_A = wave_obs * 1e4            # μm → Å
     flux_lambda = flux_nu * C_LIGHT / wave_A**2
     err_lambda = err_nu * C_LIGHT / wave_A**2
     wave_rest = wave_A / (1 + z)
