@@ -62,7 +62,7 @@ def plot_single_spectrum(ax, wave, flux, err, title, z, color='dodgerblue'):
         return
 
     # Focus range
-    x_min, x_max = 1575, 1700
+    x_min, x_max = 1500, 1800
     mask = (wave >= x_min) & (wave <= x_max)
 
     if not mask.any() or np.all(np.isnan(flux[mask])):
@@ -74,12 +74,27 @@ def plot_single_spectrum(ax, wave, flux, err, title, z, color='dodgerblue'):
     flux_zoom = flux[mask]
     err_zoom  = err[mask]
 
-    # Plot
-    ax.plot(wave_zoom, flux_zoom, color=color, lw=1.0, label='Rest-frame spectrum')
+    # Plot as step function
+    ax.step(wave_zoom, flux_zoom, where='mid', color=color, lw=1.0, label='Rest-frame spectrum')
     ax.fill_between(wave_zoom, flux_zoom - err_zoom, flux_zoom + err_zoom,
-                    color='lightblue', alpha=0.4, label='1σ uncertainty')
+                    step='mid', color='lightblue', alpha=0.4, label='1σ uncertainty')
 
-    # Adaptive y-limits with some padding
+    # --- He II 1640 line and Δz range ---
+    lambda_rest = 1640.0
+    delta_z = 0.006
+    # Observed wavelength for this z and ±Δz
+    lam_obs_high = lambda_rest * (1 + z + delta_z)
+    lam_obs_low  = lambda_rest * (1 + z - delta_z)
+    # Convert back to rest-frame limits
+    lam_rest_high = lam_obs_high / (1 + z)
+    lam_rest_low  = lam_obs_low  / (1 + z)
+
+    # Vertical dashed line at 1640 Å
+    ax.axvline(lambda_rest, color='crimson', ls='--', lw=1.0, alpha=0.8, label='He II 1640 Å')
+    # Shaded region for Δz tolerance
+    ax.axvspan(lam_rest_low, lam_rest_high, color='crimson', alpha=0.15, label=r'Δz = ±0.006 range')
+
+    # Adaptive y-limits with padding
     finite_flux = flux_zoom[np.isfinite(flux_zoom)]
     if finite_flux.size > 0:
         ymin, ymax = np.nanmin(finite_flux), np.nanmax(finite_flux)
@@ -96,6 +111,7 @@ def plot_single_spectrum(ax, wave, flux, err, title, z, color='dodgerblue'):
     ax.set_title(f"{title}\n(z = {z:.3f})", fontsize=13)
     ax.grid(alpha=0.3)
     ax.legend(frameon=False)
+
 
 
 
@@ -165,7 +181,7 @@ for idx, tro in target_df.iterrows():
 
     # --- Convert and collect spectra ---
     spectra = []
-    zoom_min, zoom_max = 1575, 1700  # region of interest
+    zoom_min, zoom_max = 1500, 1800  # region of interest
 
     for path in matched_files:
         try:
@@ -189,7 +205,7 @@ for idx, tro in target_df.iterrows():
 
     # --- Plot ---
     ncols = len(spectra)
-    fig, axes = plt.subplots(1, ncols, figsize=(6 * ncols, 5), sharey=True)
+    fig, axes = plt.subplots(1, ncols, figsize=(6 * ncols, 5))
     if ncols == 1:
         axes = [axes]
 
