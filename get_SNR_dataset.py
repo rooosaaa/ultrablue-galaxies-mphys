@@ -10,6 +10,8 @@ import os
 C_LIGHT = 2.99792458e18  # Å/s
 UV_RANGE = (1250, 3000)  # Å
 MIN_WAVELENGTH = 1200    # Å - cut for the noisy start of the spectra
+PRISM_CHECK_RANGE = (1630, 1650)  # Å - range to check for NaNs
+MAX_NAN_FRACTION = 0.5   # Maximum fraction of NaNs allowed in the check range
 SPECTRA_DIR = "/raid/scratch/work/Griley/GALFIND_WORK/Spectra/2D"
 CSV_PATH = "/nvme/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/mphys_GOODS_S_exposures.csv"
 OUT_DIR = "/nvme/scratch/work/rroberts/mphys_pop_III/UV_SNRs"
@@ -74,6 +76,34 @@ def average_snr_in_range(wave, snr, wave_range=UV_RANGE):
     if len(snr_in_range) == 0:
         return np.nan
     return np.mean(snr_in_range)
+
+
+def check_prism_coverage(wave, flux, check_range=PRISM_CHECK_RANGE, max_nan_frac=MAX_NAN_FRACTION):
+    """
+    Check if the spectrum has sufficient coverage in the prism check range.
+    Returns True if the spectrum passes (has enough valid data).
+    Returns False if there are too many NaNs in the check range.
+    """
+    # Find data points in the check range
+    mask = (wave >= check_range[0]) & (wave <= check_range[1])
+    
+    if not np.any(mask):
+        # No data in this range at all
+        print(f"No data coverage in range {check_range[0]}-{check_range[1]} Å")
+        return False
+    
+    flux_in_range = flux[mask]
+    n_total = len(flux_in_range)
+    n_nan = np.sum(~np.isfinite(flux_in_range))
+    nan_fraction = n_nan / n_total if n_total > 0 else 1.0
+    
+    print(f"Range {check_range[0]}-{check_range[1]} Å: {n_nan}/{n_total} NaNs ({nan_fraction:.1%})")
+    
+    if nan_fraction > max_nan_frac:
+        print(f"Rejected: NaN fraction {nan_fraction:.1%} exceeds threshold {max_nan_frac:.1%}")
+        return False
+    
+    return True
 
 
 def plot_spectrum(wave, flux, err, fits_name, z, out_dir):
@@ -144,6 +174,11 @@ def process_spectrum(fits_path, csv_path, out_dir):
     wave_rest, flux_rest, err_rest = convert_to_rest_frame(wave_obs, flux_obs, err_obs, z)
     wave, flux, err = clean_spectrum(wave_rest, flux_rest, err_rest)
 
+    # NEW: Check prism coverage in 1630-1650 Å range FIRST
+    if not check_prism_coverage(wave, flux):
+        print(f"Discarded {fits_name} due to insufficient prism coverage at ≥1630 Å\n")
+        return None
+
     plot_spectrum(wave, flux, err, fits_name, z, out_dir)
 
     snr, valid_mask = compute_snr(flux, err)
@@ -153,10 +188,10 @@ def process_spectrum(fits_path, csv_path, out_dir):
     # Apply the quality checks before saving to results
     if passes_quality_checks(flux, avg_snr_uv):
         plot_snr(wave_valid, snr, avg_snr_uv, fits_name, out_dir)
-        print(f"Saved {fits_name} with avg SNR (1250–3000 Å) = {avg_snr_uv:.2f}")
+        print(f"✓ Saved {fits_name} with avg SNR (1250–3000 Å) = {avg_snr_uv:.2f}\n")
         return {"file": fits_name, "avg_snr_uv": avg_snr_uv}
     else:
-        print(f"Discarded {fits_name} due to failing quality checks")
+        print(f"Discarded {fits_name} due to failing quality checks\n")
         return None
 
 # ---------------------- MAIN ----------------------
@@ -178,6 +213,4 @@ if __name__ == "__main__":
     results_csv = os.path.join(OUT_DIR, "uv_snr_summary_1.csv")
     results_df.to_csv(results_csv, index=False)
     print(f"\nSaved filtered SNR summary to: {results_csv}")
-
-
-
+    print(f"Total spectra saved: {len(results)}")
