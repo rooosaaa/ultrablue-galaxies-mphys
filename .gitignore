@@ -1,5 +1,21 @@
-*.npy
-*.pt
+# Ignore Python / ML outputs
+*.npy         # NumPy arrays
+*.pt          # PyTorch model files
+
+# Ignore images
 *.png
+
+# Ignore large FITS files
 *.fits
+
+# Ignore CSVs (if not meant to be tracked)
 *.csv
+
+# Ignore specific MCMC / project outputs
+data/project_mphys_ultrablue/pymc_outputs_g140m/
+data/project_mphys_ultrablue/pymc_outputs_g235m/
+data/project_mphys_ultrablue/pymc_outputs_g395m/
+data/project_mphys_ultrablue/pymc_outputs_g395h/
+data/project_mphys_ultrablue/pymc_outputs_prism/
+
+
