@@ -4,6 +4,7 @@ from matplotlib import cm
 from adjustText import adjust_text
 from astropy import units as u
 from astroquery.svo_fps import SvoFps
+from matplotlib.gridspec import GridSpec
 
 # COSMOS_WEB_PHOT = ['HST/ACS_WFC.F814W', 'JWST/NIRCam.F115W', 'JWST/NIRCam.F150W', 'JWST/NIRCam.F277W', 'JWST/NIRCam.F444W']
 # COSMOS_GROUND = ['Subaru/HSC.g', 'Subaru/HSC.r', 'Subaru/HSC.i', 'Subaru/HSC.z', 'Subaru/HSC.Y', 
@@ -52,7 +53,7 @@ def make_filter_plot(
 
     # Override user-provided limits if not set
     if X_LIM_L is None:
-        X_LIM_L = global_min_wave * 0.8
+        X_LIM_L = global_min_wave * 0.5
     if X_LIM_U is None:
         X_LIM_U = global_max_wave * 1.05
     if Y_LIM_L is None:
@@ -60,15 +61,24 @@ def make_filter_plot(
 
     # --- Set up figure ---
     n = len(filter_array)
-    fig, axes = plt.subplots(n, 1, figsize=(10, plot_height * n), squeeze=False)
-    fig.subplots_adjust(wspace=0.3, hspace=0.6)
+
+    fig = plt.figure(figsize=(10, plot_height * n))
+    gs = GridSpec(n, 1, figure=fig, hspace=0.0)
+
+    axes = []
+    for i in range(n):
+        if i == 0:
+            ax = fig.add_subplot(gs[i, 0])
+        else:
+            ax = fig.add_subplot(gs[i, 0], sharex=axes[0])
+        axes.append(ax)
 
     # Normalize the central wavelength for the colormap
     norm = plt.Normalize(min(central_wavelengths), max(central_wavelengths))
     cmap = cm.rainbow
 
     for i, (filters, name) in enumerate(zip(filter_array, series_names)):
-        ax = axes[i][0]
+        ax = axes[i]
         max_transmission_this_ax = 0
         text_objects = []
         x_anno = []
@@ -91,12 +101,13 @@ def make_filter_plot(
 
             if label_mode == 'Annotate':
                 x_annotate = 0.5 * (wavelength.min() + wavelength.max())
+
                 y_annotate = peak * (1 + label_offset)
 
                 text = ax.annotate(
                     filter_name,
                     xy=(x_annotate, y_annotate),
-                    ha='center',
+                    ha='right' if filter_name == 'F070W' else 'center',
                     va='bottom',
                     fontsize=14,
                     color='k'
@@ -107,11 +118,25 @@ def make_filter_plot(
         # Y-axis upper limit per axis
         final_Y_LIM_U = global_max_transmission * 1.2 + 0.1 * global_max_transmission
 
-        ax.set_title(name, fontsize=20)
-        ax.set_xlabel('Wavelength $(\AA)$', fontsize=20)
-        ax.set_ylabel('Transmission', fontsize=20)
+        # ax.set_title(name, fontsize=20)
+        if i < n - 1:
+            ax.tick_params(labelbottom=False)
+        else:
+            ax.set_xlabel('Wavelength $(\\AA)$', fontsize=24, labelpad=10)  
+
+
+        # ax.set_xlabel('Wavelength $(\AA)$', fontsize=20)
+        # ax.set_ylabel('Transmission', fontsize=20)
+        fig.text(
+            0.04, 0.5,
+            'Transmission',
+            va='center',
+            rotation='vertical',
+            fontsize=24
+        )
         ax.set_xlim(left=X_LIM_L, right=X_LIM_U)
         ax.set_ylim(bottom=Y_LIM_L, top=final_Y_LIM_U)
+        ax.set_yticks([0.2, 0.4, 0.6])
 
         if Plot_grid:
             ax.grid(True, alpha=0.5)
@@ -133,7 +158,7 @@ def make_filter_plot(
                     only_move={'points': 'y', 'text': 'y'},
                     expand=(1.05, 1.05),
                     force_text=0.3,
-                    force_points=0.1,
+                    force_points=0.2,
                     arrowprops=None,
                     avoid_self=False
                 )
