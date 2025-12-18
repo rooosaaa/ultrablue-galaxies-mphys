@@ -107,9 +107,9 @@ def make_filter_plot(
                 text = ax.annotate(
                     filter_name,
                     xy=(x_annotate, y_annotate),
-                    ha='right' if filter_name == 'F070W' else 'center',
+                    ha='right' if filter_name == 'F070W' or filter_name == 'F140M' or filter_name == 'F162M' or filter_name == 'F335M' else 'center',
                     va='bottom',
-                    fontsize=14,
+                    fontsize=16,
                     color='k'
                 )
                 text_objects.append(text)
@@ -122,17 +122,17 @@ def make_filter_plot(
         if i < n - 1:
             ax.tick_params(labelbottom=False)
         else:
-            ax.set_xlabel('Wavelength $(\\AA)$', fontsize=24, labelpad=10)  
+            ax.set_xlabel('Wavelength $(\\AA)$', fontsize=30, labelpad=10)  
 
 
         # ax.set_xlabel('Wavelength $(\AA)$', fontsize=20)
-        # ax.set_ylabel('Transmission', fontsize=20)
+        # ax.set_ylabel('Transmission', fontsize=30)
         fig.text(
             0.04, 0.5,
             'Transmission',
             va='center',
             rotation='vertical',
-            fontsize=24
+            fontsize=30
         )
         ax.set_xlim(left=X_LIM_L, right=X_LIM_U)
         ax.set_ylim(bottom=Y_LIM_L, top=final_Y_LIM_U)
@@ -144,7 +144,7 @@ def make_filter_plot(
             ax.grid(False)
 
         ax.minorticks_on()
-        ax.tick_params(which='both', direction='in', top=True, right=True, labelsize=14)
+        ax.tick_params(which='both', direction='in', top=True, right=True, labelsize=18)
 
         if label_mode == 'Legend':
             ax.legend()
