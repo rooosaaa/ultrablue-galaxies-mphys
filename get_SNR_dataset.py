@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from astropy.io import fits
 from astropy.stats import sigma_clip
 import pandas as pd
+from astropy.table import Table
 import os
 
 
@@ -12,29 +13,90 @@ UV_RANGE = (1250, 3000)  # Å
 MIN_WAVELENGTH = 1200    # Å - cut for the noisy start of the spectra
 PRISM_CHECK_RANGE = (1630, 1650)  # Å - range to check for NaNs
 MAX_NAN_FRACTION = 0.5   # Maximum fraction of NaNs allowed in the check range
-SPECTRA_DIR = "/raid/scratch/work/Griley/GALFIND_WORK/Spectra/2D"
-CSV_PATH = "/nvme/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/mphys_GOODS_S_exposures.csv"
+SPECTRA_DIR = "/raid/scratch/work/austind/GALFIND_WORK/Spectra/2D"
+# CSV_PATH = "/nvme/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/mphys_GOODS_S_exposures.csv"
+CATALOGUE_PATH = "/raid/scratch/work/Griley/GALFIND_WORK/Catalogues/gdsgdn_catalogue.fits"
 OUT_DIR = "/nvme/scratch/work/rroberts/mphys_pop_III/UV_SNRs"
+LOCAL_DIR = "/raid/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys"
 os.makedirs(OUT_DIR, exist_ok=True)
 
 # ---------------------- CORE FUNCTIONS ----------------------
 
 def find_prism_fits(base_dir):
-    """Recursively find all FITS files with 'prism' in the filename."""
+    """Recursively find all FITS files with 'prism' and one of
+    'gds', 'gdn', or 'goodsn' in the filename.
+    """
     fits_files = []
+    required_substrings = ("gds", "gdn", "goodsn")
+
     for root, dirs, files in os.walk(base_dir):
         for f in files:
-            if f.endswith(".fits") and "prism" in f:
+            fname = f.lower()
+            if (
+                fname.endswith(".fits")
+                and "prism" in fname
+                and "v4" in fname
+                and any(s in fname for s in required_substrings)
+            ):
                 fits_files.append(os.path.join(root, f))
+
     return fits_files
 
 
-def get_redshift(csv_path, fits_name):
-    df = pd.read_csv(csv_path)
-    match = df[df['file'] == fits_name]
-    if match.empty:
-        raise ValueError(f"No matching entry in CSV for: {fits_name}")
-    return float(match['z'].values[0])
+# def get_redshift(catalogue_path, fits_name):
+#     df = pd.read_csv(catalogue_path)
+#     match = df[df['file'] == fits_name]
+#     if match.empty:
+#         raise ValueError(f"No matching entry in CSV for: {fits_name}")
+#     return float(match['z'].values[0])
+
+
+def get_redshift(catalogue_path, fits_name,
+                 file_col="file", z_col="zrf"):
+    """
+    Read redshift from a FITS catalogue.
+
+    Parameters
+    ----------
+    catalogue_path : str
+        Path to the FITS catalogue
+    fits_name : str
+        Name of the spectrum FITS file (basename)
+    file_col : str
+        Column name containing spectrum filenames
+    z_col : str
+        Column name containing redshifts
+    """
+
+    cat = Table.read(catalogue_path)
+
+    if file_col not in cat.colnames:
+        raise KeyError(f"Column '{file_col}' not found in catalogue")
+
+    if z_col not in cat.colnames:
+        raise KeyError(f"Column '{z_col}' not found in catalogue")
+    
+    # Match by basename (important if paths differ)
+    cat_basenames = [os.path.basename(str(f)) for f in cat[file_col]]
+
+    matches = [i for i, f in enumerate(cat_basenames) if f == fits_name]
+
+    if len(matches) == 0:
+        print(f"[MISSING IN CATALOGUE] Spectrum file has no catalogue entry: {fits_name}")
+        raise ValueError(f"No matching entry in catalogue for: {fits_name}\n")
+
+    # # Match by basename (important if paths differ)
+    # matches = [i for i, f in enumerate(cat[file_col])
+    #            if os.path.basename(str(f)) == fits_name]
+
+    # if len(matches) == 0:
+    #     raise ValueError(f"No matching entry in catalogue for: {fits_name}")
+
+    if len(matches) > 1:
+        print(f"Warning: multiple matches for {fits_name}, using first")
+
+    return float(cat[z_col][matches[0]])
+
 
 
 def read_spectrum(fits_path):
@@ -85,7 +147,11 @@ def check_prism_coverage(wave, flux, check_range=PRISM_CHECK_RANGE, max_nan_frac
     Returns False if there are too many NaNs in the check range.
     """
     # Find data points in the check range
-    mask = (wave >= check_range[0]) & (wave <= check_range[1])
+    mask = (
+    np.isfinite(wave)
+    & (wave >= check_range[0])
+    & (wave <= check_range[1])
+    )
     
     if not np.any(mask):
         # No data in this range at all
@@ -165,21 +231,18 @@ def passes_quality_checks(flux, snr_uv, max_consec_nans=10):
     return True
 
 
-def process_spectrum(fits_path, csv_path, out_dir):
+def process_spectrum(fits_path, catalogue_path, out_dir):
     fits_name = os.path.basename(fits_path)
-    z = get_redshift(csv_path, fits_name)
+    z = get_redshift(catalogue_path, fits_name)
     print(f"Processing {fits_name}, z = {z:.4f}")
 
     wave_obs, flux_obs, err_obs = read_spectrum(fits_path)
     wave_rest, flux_rest, err_rest = convert_to_rest_frame(wave_obs, flux_obs, err_obs, z)
     wave, flux, err = clean_spectrum(wave_rest, flux_rest, err_rest)
 
-    # NEW: Check prism coverage in 1630-1650 Å range FIRST
-    if not check_prism_coverage(wave, flux):
-        print(f"Discarded {fits_name} due to insufficient prism coverage at ≥1630 Å\n")
-        return None
-
-    plot_spectrum(wave, flux, err, fits_name, z, out_dir)
+    # if not check_prism_coverage(wave, flux):
+    #     print(f"Discarded {fits_name} due to insufficient prism coverage at ≥1630 Å\n")
+    #     return None
 
     snr, valid_mask = compute_snr(flux, err)
     wave_valid = wave[valid_mask]
@@ -187,11 +250,12 @@ def process_spectrum(fits_path, csv_path, out_dir):
 
     # Apply the quality checks before saving to results
     if passes_quality_checks(flux, avg_snr_uv):
-        plot_snr(wave_valid, snr, avg_snr_uv, fits_name, out_dir)
-        print(f"✓ Saved {fits_name} with avg SNR (1250–3000 Å) = {avg_snr_uv:.2f}\n")
+        # plot_snr(wave_valid, snr, avg_snr_uv, fits_name, out_dir)
+        print(f"Saved {fits_name} with avg SNR (1250–3000 Å) = {avg_snr_uv:.2f}\n")
+        plot_spectrum(wave, flux, err, fits_name, z, out_dir)
         return {"file": fits_name, "avg_snr_uv": avg_snr_uv}
     else:
-        print(f"Discarded {fits_name} due to failing quality checks\n")
+        print(f"Discarded {fits_name} due to failing quality checks, uv_snr = {avg_snr_uv}\n")
         return None
 
 # ---------------------- MAIN ----------------------
@@ -200,17 +264,49 @@ if __name__ == "__main__":
     fits_files = find_prism_fits(SPECTRA_DIR)
     print(f"Found {len(fits_files)} prism FITS files to process.\n")
 
-    results = []
+    results_csv = os.path.join(LOCAL_DIR, "uv_snr_summary_gdsgdn.csv")
+
+    # Load already-processed filenames (if CSV exists)
+    if os.path.exists(results_csv):
+        existing_df = pd.read_csv(results_csv, usecols=["file"])
+        processed = set(existing_df["file"].astype(str))
+        header_written = True
+        print(f"Skipping {len(processed)} already-processed spectra.\n")
+    else:
+        processed = set()
+        header_written = False
+
+    n_saved = 0
+    n_skipped = 0
+
     for f in fits_files:
+        fits_name = os.path.basename(f)
+
+        if fits_name in processed:
+            n_skipped += 1
+            continue
+
         try:
-            res = process_spectrum(f, CSV_PATH, OUT_DIR)
-            if res is not None:
-                results.append(res)
+            res = process_spectrum(f, CATALOGUE_PATH, OUT_DIR)
+            if res is None:
+                continue
+
+            df = pd.DataFrame([res])
+            df.to_csv(
+                results_csv,
+                mode="a",
+                header=not header_written,
+                index=False,
+            )
+
+            header_written = True
+            processed.add(fits_name)
+            n_saved += 1
+
         except Exception as e:
             print(f"Failed {f}: {e}")
 
-    results_df = pd.DataFrame(results)
-    results_csv = os.path.join(OUT_DIR, "uv_snr_summary_1.csv")
-    results_df.to_csv(results_csv, index=False)
     print(f"\nSaved filtered SNR summary to: {results_csv}")
-    print(f"Total spectra saved: {len(results)}")
+    print(f"New spectra saved: {n_saved}")
+    print(f"Spectra skipped (already in CSV): {n_skipped}")
+

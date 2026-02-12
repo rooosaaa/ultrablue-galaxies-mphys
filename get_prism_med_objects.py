@@ -1,20 +1,26 @@
 import pandas as pd
 import re
-import os
+from astropy.io import fits
+from astropy.table import Table
+
 
 # ---------------------- CONFIG ----------------------
-snr_csv_path = "/nvme/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/uv_snr_summary_1.csv"
-master_csv_path = "/nvme/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/mphys_GOODS_S_exposures.csv"
-out_csv_path = "/nvme/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/uv_snr5plus_with_prism_and_medium.csv"
+snr_csv_path = "/raid/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/uv_snr_summary_gdsgdn.csv"
+CATALOGUE_PATH = "/raid/scratch/work/Griley/GALFIND_WORK/Catalogues/gdsgdn_catalogue.fits"
+out_csv_path = "/raid/scratch/work/rroberts/mphys_pop_III/ultrablue-galaxies-mphys/uv_snr5plus_with_prism_and_medium.csv"
 
 # ---------------------- LOAD DATA ----------------------
 snr_df = pd.read_csv(snr_csv_path)
-master_df = pd.read_csv(master_csv_path)
+
+# Load catalogue FITS table
+table = Table.read(CATALOGUE_PATH)
+cat_df = table.to_pandas()
+
+print(f"Loaded {len(cat_df)} entries from catalogue")
 
 # --- Filter by SNR ≥ 5 ---
 snr_df = snr_df[snr_df["avg_snr_uv"] >= 5].copy()
 print(f"SNR ≥ 5 spectra: {len(snr_df)}")
-
 
 # ---------------------- HELPERS ----------------------
 def extract_suffix_id(filename):
@@ -35,9 +41,22 @@ def identify_band(filename):
 
 
 # ---------------------- PREPARE DATA ----------------------
+
+# Adjust this column name if needed
+CAT_FILENAME_COLUMN = "file"
+
+cat_df[CAT_FILENAME_COLUMN] = (
+    cat_df[CAT_FILENAME_COLUMN]
+    .astype(str)
+    .str.strip()
+)
+
+snr_df["file"] = snr_df["file"].astype(str).str.strip()
+
+cat_df["suffix_id"] = cat_df[CAT_FILENAME_COLUMN].apply(extract_suffix_id)
+cat_df["band"] = cat_df[CAT_FILENAME_COLUMN].apply(identify_band)
+
 snr_df["suffix_id"] = snr_df["file"].apply(extract_suffix_id)
-master_df["suffix_id"] = master_df["file"].apply(extract_suffix_id)
-master_df["band"] = master_df["file"].apply(identify_band)
 
 # ---------------------- BUILD OUTPUT ----------------------
 rows = []
@@ -48,19 +67,19 @@ for _, snr_row in snr_df.iterrows():
         continue
 
     snr_value = snr_row["avg_snr_uv"]
-    matches = master_df[master_df["suffix_id"] == suffix_id]
+    matches = cat_df[cat_df["suffix_id"] == suffix_id]
     if matches.empty:
         continue
 
     # Map files by grating
     file_map = {
-        band: matches.loc[matches["band"] == band, "file"].iloc[0]
+        band: matches.loc[matches["band"] == band, CAT_FILENAME_COLUMN].iloc[0]
         if not matches.loc[matches["band"] == band].empty
         else None
         for band in ["prism", "g140m", "g235m", "g395m", "g395h"]
     }
 
-    # Only keep those that have both a prism and at least one medium grating
+    # Keep only if prism + at least one medium grating
     if file_map["prism"] and any(file_map[g] for g in ["g140m", "g235m", "g395m"]):
         rows.append({
             "suffix_id": suffix_id,
